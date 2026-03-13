@@ -37,8 +37,11 @@ if _missing:
     def _do_install():
         for mod, pkg in _missing:
             _splash.after(0, _lbl.config, {"text": f"Installing: {pkg}"})
-            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg,
-                                   "--break-system-packages", "-q"])
+            cmd = [sys.executable, "-m", "pip", "install", pkg, "-q"]
+            # Parametr --break-system-packages pouze na Linuxu
+            if sys.platform.startswith("linux"):
+                cmd.insert(-1, "--break-system-packages")
+            subprocess.check_call(cmd)
         _splash.after(0, _splash.destroy)
 
     import threading
@@ -643,6 +646,12 @@ class DownloaderApp(ctk.CTk):
             import webbrowser; webbrowser.open("https://ffmpeg.org/download.html")
 
     def _ffmpeg_install_thread(self):
+        # Instalace FFmpeg pouze na Windows pomocí winget
+        if sys.platform != "win32":
+            self.after(0, self._set_phase, self._("ffmpeg_failed") + "winget is Windows-only", "red")
+            self.after(0, lambda: self.ffmpeg_dl_btn.configure(state="normal"))
+            return
+        
         try:
             subprocess.run(["winget", "install", "--id", "Gyan.FFmpeg", "-e", "--silent"],
                 check=True, capture_output=True)
@@ -780,6 +789,13 @@ class DownloaderApp(ctk.CTk):
             if not video_formats:
                 ctk.CTkLabel(self.formats_scroll, text=self._("no_formats"),
                     text_color="gray").pack(pady=20)
+                self.formats = []
+                # Deaktivovat tlačítka, pokud nejsou žádné formáty
+                self.download_video_btn.configure(state="disabled")
+                self.download_mp3_btn.configure(state="normal")  # MP3 může fungovat i bez video formátů
+                self.fetch_btn.configure(state="normal", text=self._("btn_load"))
+                self._set_phase(self._("no_formats"), "red")
+                return
             else:
                 self.format_var.set(video_formats[0][2])
                 for _, label, fid in video_formats:
@@ -921,7 +937,20 @@ class DownloaderApp(ctk.CTk):
                   next((lbl for _, lbl, fid in self.formats if fid == self.format_var.get()),
                        self._("mp3_best"))
         path     = self._downloaded_path or ""
-        size_str = _fmt_size(os.path.getsize(path)) if path and os.path.exists(path) else ""
+        
+        # Bezpečné získání velikosti souboru - kontrola existence a typu
+        size_str = ""
+        if path and os.path.isfile(path):
+            try:
+                size_str = _fmt_size(os.path.getsize(path))
+            except (OSError, FileNotFoundError):
+                size_str = ""
+        
+        # Pro playlisty nastavit cestu k výstupní složce
+        if self._is_playlist and not path:
+            playlist_title = info.get("title") or info.get("playlist_title") or "playlist"
+            path = os.path.join(self.download_path, playlist_title)
+        
         src, _   = detect_source(self.url_entry.get().strip(), self._("unknown_source"))
 
         append_history({
