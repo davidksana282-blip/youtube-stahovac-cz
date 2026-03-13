@@ -1,1 +1,3 @@
-python yt_downloader.py
+@echo off
+start "" cmd /c python yt_downloader.py
+exit
